@@ -1,1 +1,1 @@
-export { default as CreateCommand } from './create';
+export { default as CreateCommand } from './config';

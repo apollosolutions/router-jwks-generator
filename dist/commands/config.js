@@ -20,7 +20,7 @@ const write_yaml_file_1 = __importDefault(require("write-yaml-file"));
 // @ts-ignore
 const load_yaml_file_1 = __importDefault(require("load-yaml-file"));
 const url_1 = require("url");
-class CreateCommand extends clipanion_1.Command {
+class ConfigCommand extends clipanion_1.Command {
     constructor() {
         super(...arguments);
         this.config = clipanion_1.Option.String('-c,--config');
@@ -189,7 +189,6 @@ class CreateCommand extends clipanion_1.Command {
             if (this.config) {
                 yaml = (yield (0, load_yaml_file_1.default)(this.config));
             }
-            console.log(yaml);
             (0, write_yaml_file_1.default)((_a = this.config) !== null && _a !== void 0 ? _a : 'router.yaml', Object.assign(Object.assign({}, yaml), { authentication: {
                     experimental: {
                         jwt: {
@@ -202,10 +201,10 @@ class CreateCommand extends clipanion_1.Command {
         });
     }
 }
-exports.default = CreateCommand;
-CreateCommand.paths = [['create-config']];
-CreateCommand.usage = clipanion_1.Command.Usage({
+exports.default = ConfigCommand;
+ConfigCommand.paths = [['configure']];
+ConfigCommand.usage = clipanion_1.Command.Usage({
     category: 'Create',
     description: 'Guides you through creation of JWKS via either explicit configuration or by using a sample JWT',
-    examples: [['Basic usage', '$0 create-config']],
+    examples: [['Basic usage', '$0 configure'], ['Modifying existing configuration file', '$0 configure --config <config_path>']],
 });

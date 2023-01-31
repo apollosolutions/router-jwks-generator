@@ -1,22 +1,30 @@
-import { Command } from 'clipanion';
+import { Command, Option } from 'clipanion';
 import { JsonWebKey } from 'crypto';
 import inquirer from 'inquirer';
 import { decode, Jwt, Algorithm } from 'jsonwebtoken';
-import { writeFileSync } from 'fs';
+import { writeFileSync, existsSync } from 'fs';
 import writeYamlFile from 'write-yaml-file';
+// @ts-ignore
+import loadYamlFile from 'load-yaml-file';
 import { URL } from 'url';
 
-export default class CreateCommand extends Command {
-  static paths = [['create-config']];
+export default class ConfigCommand extends Command {
+  static paths = [['configure']];
+  config = Option.String('-c,--config')
 
   static usage = Command.Usage({
     category: 'Create',
     description:
       'Guides you through creation of JWKS via either explicit configuration or by using a sample JWT',
-    examples: [['Basic usage', '$0 create-config']],
+    examples: [['Basic usage', '$0 configure'], ['Modifying existing configuration file', '$0 configure --config <config_path>']],
   });
 
   async execute(): Promise<number | void> {
+    if (this.config !== undefined && !existsSync(this.config)) {
+      this.context.stdout.write(`Error reading config. Ensure the file exists and try again.\n`)
+      return 1
+    }
+
     const { hasJWT } = await inquirer.prompt({
       type: 'confirm',
       name: 'hasJWT',
@@ -197,7 +205,14 @@ export default class CreateCommand extends Command {
       );
       return 1;
     }
-    writeYamlFile('router.yaml', {
+
+    let yaml: object = {}
+    if (this.config) {
+      yaml = await loadYamlFile(this.config) as object
+    }
+
+    writeYamlFile(this.config ?? 'router.yaml', {
+      ...yaml,
       authentication: {
         experimental: {
           jwt: {
@@ -208,8 +223,7 @@ export default class CreateCommand extends Command {
     });
 
     this.context.stdout.write(
-      `Finished creating file${
-        !hasJWKSEndpoint ? 's' : ''
+      `Finished creating file${!hasJWKSEndpoint ? 's' : ''
       }. Output to router.yaml${!hasJWKSEndpoint ? ' and jwks.json' : ''}\n`,
     );
     return 0;

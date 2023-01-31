@@ -12,10 +12,16 @@
 
 ### Basic Usage
 
-The tool will guide you through creating a router configuration file used with the new authentication plugin.
+The tool will guide you through creating a router configuration file used with the new authentication plugin. By default, the plugin will create a new `router.yaml` if run as: 
 
 ```sh
-npx github:@apollosolutions/router-jwks-generator create-config
+npx github:@apollosolutions/router-jwks-generator configure
+```
+
+However you can have the tool modify an existing configuration by using the following:
+
+```sh
+npx github:@apollosolutions/router-jwks-generator configure --config router.yaml
 ```
 
 ## Known Limitations
