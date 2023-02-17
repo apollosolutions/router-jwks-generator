@@ -1,7 +1,7 @@
 import { Command, Option } from 'clipanion';
 import { JsonWebKey } from 'crypto';
 import inquirer from 'inquirer';
-import { decode, Jwt, Algorithm } from 'jsonwebtoken';
+import { decode, Jwt, Algorithm, JwtPayload } from 'jsonwebtoken';
 import { writeFileSync, existsSync } from 'fs';
 import writeYamlFile from 'write-yaml-file';
 // @ts-ignore
@@ -35,6 +35,11 @@ export default class ConfigCommand extends Command {
     let algorithm: Algorithm = 'none';
     let keyID: String | undefined;
     let symmetric = false;
+    let jwksUrl = '';
+
+    // 
+
+    // 
     if (hasJWT) {
       const { jwt } = await inquirer.prompt({
         type: 'input',
@@ -48,12 +53,30 @@ export default class ConfigCommand extends Command {
         },
       });
 
-      const decoded = decode(jwt, { complete: true });
-
       // we already validated that the token was successfully decoded, but coercing TS to respect that
-      const { alg, kid } = (decoded as Jwt).header;
+      //@ts-ignore
+      const decoded: Jwt = decode(jwt, { complete: true });
+
+      const { alg, kid } = decoded.header;
       keyID = kid;
       algorithm = alg as Algorithm;
+
+      if ((decoded.payload as JwtPayload).iss) {
+        let { iss } = decoded.payload as JwtPayload
+
+        if (!isAlgorithmSymmetric(algorithm)[0] && iss) {
+          // let's handle the common IdPs to make it real easy for folks
+          if (iss.includes('auth0')) {
+            jwksUrl = iss += '.well-known/jwks.json'
+            this.context.stdout.write(`It appears you are using Auth0, so we've set your JWKS URL to ${jwksUrl}\n`)
+          } else if (iss.includes('okta')) {
+            // https://developer.okta.com/docs/guides/validate-access-tokens/dotnet/main/
+            jwksUrl = iss += "/v1/keys"
+            this.context.stdout.write(`It appears you are using Okta, so we've set your JWKS URL to ${jwksUrl}\n`)
+          }
+        }
+
+      }
     }
 
     if (algorithm === 'none') {
@@ -80,51 +103,26 @@ export default class ConfigCommand extends Command {
       algorithm = alg;
     }
 
-    switch (algorithm) {
-      case 'HS256':
-      case 'HS384':
-      case 'HS512':
-        symmetric = true;
-        this.context.stdout.write(
-          `It appears you are using an HMAC hash for symmetric token signing. In the router, you'll be given an option to either use a local file or hosted JWKS. For hosted JWKS, we recommend ensuring that the endpoint is internal-only and that the router has access to that endpoint.\n`,
-        );
-        break;
-      case 'ES256':
-      case 'ES384':
-      case 'ES512':
-        this.context.stdout.write(
-          `It appears you are using an Elliptic Curve Digital Signature Algorithm (ECDSA) signing key for asymmetric token signing. In the router, you'll be given an option to either use a local file or hosted JWKS. For asymmetric key signing, we'd recommend using a hosted JWKS, such as those provided by IdPs such as Auth0 or Okta.\n`,
-        );
-        break;
-      case 'RS256':
-      case 'RS384':
-      case 'RS512':
-        this.context.stdout.write(
-          `It appears you are using an RSA-based signing key for asymmetric token signing. In the router, you'll be given an option to either use a local file or hosted JWKS. For asymmetric key signing, we'd recommend using a hosted JWKS, such as those provided by IdPs such as Auth0 or Okta.\n`,
-        );
-        break;
-      case 'PS256':
-      case 'PS384':
-      case 'PS512':
-        this.context.stdout.write(
-          `It appears you are using an RSASSA-PSS signing key for asymmetric token signing. In the router, you'll be given an option to either use a local file or hosted JWKS. For asymmetric key signing, we'd recommend using a hosted JWKS, such as those provided by IdPs such as Auth0 or Okta.\n`,
-        );
-        break;
-      default:
-        this.context.stdout.write(
-          `Unable to determine JWT algorithm. Please ensure the JWT is formatted correctly and try again.\n`,
-        );
-        break;
-    }
-    const { hasJWKSEndpoint } = await inquirer.prompt({
-      type: 'confirm',
-      name: 'hasJWKSEndpoint',
-      message:
-        'Do you have the JWKS endpoint that can validate your token? If you do not have a JWKS endpoint, enter no.',
-    });
+    let message = "";
+    [symmetric, message] = isAlgorithmSymmetric(algorithm)
 
-    let jwksUrl = '';
-    if (symmetric && !hasJWKSEndpoint) {
+    this.context.stdout.write(message)
+
+    let hasJWKSEndpoint = !!jwksUrl
+
+    if (!jwksUrl) {
+      this.context.stdout.write("In the router, you'll be given an option to either use a local file or hosted JWKS. For asymmetric key signing, we'd recommend using a hosted JWKS, such as those provided by IdPs such as Auth0 or Okta. For symmetric tokens, we'd recommend a local file which can be crafted with this tool. To do so, select no and have the signing key available to paste.\n")
+      let res = await inquirer.prompt({
+        type: 'confirm',
+        name: 'hasJWKSEndpoint',
+        message:
+          'Do you have the JWKS endpoint that can validate your token? If you do not have a JWKS endpoint, enter no.',
+      });
+      hasJWKSEndpoint = res.hasJWKSEndpoint
+    }
+
+
+    if (symmetric && !jwksUrl) {
       const { hasKey } = await inquirer.prompt({
         type: 'confirm',
         name: 'hasKey',
@@ -174,13 +172,13 @@ export default class ConfigCommand extends Command {
       writeFileSync('jwks.json', JSON.stringify(jwks));
       // eslint-disable-next-line
       jwksUrl = 'file://${env.PWD}/jwks.json';
-    } else if (!symmetric && !hasJWKSEndpoint) {
+    } else if (!symmetric && !jwksUrl) {
       // currently unsupported, so throw error with message
       this.context.stdout.write(
         'Asymmetric keys using a local JWKS file not currently supported by this tool, however it is possible to craft one manually\n',
       );
       return 1;
-    } else if (hasJWKSEndpoint) {
+    } else if (!jwksUrl) {
       const { userJwksUrl } = await inquirer.prompt({
         type: 'input',
         name: 'userJwksUrl',
@@ -216,7 +214,7 @@ export default class ConfigCommand extends Command {
       authentication: {
         experimental: {
           jwt: {
-            jwks_url: jwksUrl,
+            jwks_urls: [jwksUrl],
           },
         },
       },
@@ -227,5 +225,28 @@ export default class ConfigCommand extends Command {
       }. Output to router.yaml${!hasJWKSEndpoint ? ' and jwks.json' : ''}\n`,
     );
     return 0;
+  }
+}
+
+const isAlgorithmSymmetric = (algorithm: Algorithm): [boolean, string] => {
+  switch (algorithm) {
+    case 'HS256':
+    case 'HS384':
+    case 'HS512':
+      return [true, `It appears you are using an HMAC hash for symmetric token signing.\n`]
+    case 'ES256':
+    case 'ES384':
+    case 'ES512':
+      return [false, `It appears you are using an Elliptic Curve Digital Signature Algorithm (ECDSA) signing key for asymmetric token signing.\n`,]
+    case 'RS256':
+    case 'RS384':
+    case 'RS512':
+      return [false, `It appears you are using an RSA-based signing key for asymmetric token signing.\n`]
+    case 'PS256':
+    case 'PS384':
+    case 'PS512':
+      return [false, `It appears you are using an RSASSA-PSS signing key for asymmetric token signing.\n`]
+    default:
+      return [false, `Unable to determine JWT algorithm. Please ensure the JWT is formatted correctly and try again.\n`]
   }
 }
