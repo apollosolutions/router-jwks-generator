@@ -1,0 +1,7 @@
+name: router-jwks-generator
+description: A CLI tool to generate a JWKS file for use with the router
+  authentication plugin.
+tags:
+  - JWT
+  - Authentication
+  - Router
